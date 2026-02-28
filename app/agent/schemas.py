@@ -18,9 +18,10 @@ class StepObservation(BaseModel):
     """Observer 输出：对 tool 结果的分析"""
 
     summary: str
-    sql_executed: str
-    result_display: str
-    sql_status: str
+    display_text: str  # 模型生成的用户可见 Markdown 内容
+    sql_executed: str | None = None
+    result_display: str | None = None
+    sql_status: str | None = None
     analysis: str | None = None
     sql_explanation: str | None = None
     next_step_hint: str

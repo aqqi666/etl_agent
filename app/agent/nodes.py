@@ -149,36 +149,14 @@ async def observer(state: ETLState) -> dict:
     if current_step < len(plan):
         plan[current_step].status = "completed"
 
-    # 渲染结果存入 state，由 replanner 合并后推送
-    observation_md = _render_observation(observation)
-
     return {
         "artifacts": updated,
-        "observation_text": observation_md,
+        "observation_text": observation.display_text,
         "past_steps": [(
             plan[current_step].title if current_step < len(plan) else "unknown",
             observation.summary,
         )],
     }
-
-
-def _render_observation(obs: StepObservation) -> str:
-    parts = [f"### {obs.summary}\n"]
-    if obs.sql_executed:
-        parts.append(f"验证 SQL：\n```sql\n{obs.sql_executed}\n```\n")
-    if obs.result_display:
-        parts.append(f"实际返回：\n{obs.result_display}\n")
-    if obs.sql_status:
-        parts.append(f"SQL 返回码：{obs.sql_status}\n")
-    if obs.analysis:
-        parts.append(f"**分析:** {obs.analysis}\n")
-    if obs.sql_explanation:
-        parts.append(f"**SQL 解释:**\n{obs.sql_explanation}\n")
-    if obs.next_step_hint:
-        parts.append(f"\n{obs.next_step_hint}\n")
-    if obs.missing_info:
-        parts.append("**需要补充的信息:**\n" + "\n".join(f"- {i}" for i in obs.missing_info) + "\n")
-    return "\n".join(parts)
 
 
 # ── replanner ────────────────────────────────────────────────────────
