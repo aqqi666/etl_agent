@@ -126,15 +126,19 @@ REPLANNER_PROMPT = """\
 {artifacts_json}
 
 ## 决策选项
-- continue：当前步骤已完成，前进到下一步
+- continue：当前步骤已完成，前进到下一步（不等待用户）
 - replan：需要调整剩余计划（如用户改变需求）
 - respond：任务完成或需要总结，生成最终回复
-- ask_user：信息不足，需要向用户提问
+- ask_user：需要用户输入才能继续
+
+## step_complete 字段（ask_user 时必须正确设置）
+- step_complete=true：当前步骤的工作已完成，等待的是下一步所需的信息。例如：连接成功后问用户选哪个表、查完表结构后问用户描述目标表
+- step_complete=false：当前步骤的工作未完成，等待用户确认后还要继续当前步骤。例如：生成了建表 SQL 等待用户确认执行、生成了映射 SQL 等待用户确认执行
 
 ## 决策原则（优先级从高到低）
-1. 如果 executor 展示了待确认的 SQL（CREATE TABLE / INSERT INTO 等），必须选择 ask_user 等待用户确认
-2. 如果当前步骤已完成且下一步需要用户提供新信息（如选择基表、描述目标表结构、描述字段映射），选择 ask_user 并生成引导性问题
-3. 如果用户的最新消息是在回答之前的提问（如回复了表名、确认执行等），选择 continue 继续到下一步
+1. 如果 executor 生成了待确认的 SQL（CREATE TABLE / INSERT INTO 等），选择 ask_user + step_complete=false
+2. 如果当前步骤已完成且下一步需要用户提供新信息，选择 ask_user + step_complete=true
+3. 如果用户的最新消息是在回答之前的提问（如回复了表名、确认执行等），选择 continue
 4. 如果当前步骤已完成且下一步可以自动执行（如已有足够信息），选择 continue
 5. 如果用户要求修改已完成的步骤或提出新需求，选择 replan
 6. 如果所有步骤都已完成，选择 respond 生成总结

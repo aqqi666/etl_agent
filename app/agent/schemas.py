@@ -59,6 +59,7 @@ class ReplanDecision(BaseModel):
     """Replanner 输出：继续/调整/完成"""
 
     action: str  # "continue" | "replan" | "respond" | "ask_user"
+    step_complete: bool = True  # ask_user 时：当前步骤是否已完成
     updated_plan: list[ETLStep] | None = None
     response: str | None = None
     question: str | None = None

@@ -143,11 +143,9 @@ async def observer(state: ETLState) -> dict:
     else:
         updated = artifacts
 
-    # 标记当前步骤完成
+    # 不在 observer 中标记步骤完成，由 replanner 的 continue 决定
     plan = state.get("plan", [])
     current_step = state.get("current_step", 0)
-    if current_step < len(plan):
-        plan[current_step].status = "completed"
 
     return {
         "artifacts": updated,
@@ -194,12 +192,23 @@ async def replanner(state: ETLState) -> dict:
 
     if decision.action == "ask_user":
         question = decision.question or "请提供更多信息。"
-        logger.info("[replanner] 向用户提问: %s", question[:100])
+        logger.info("[replanner] 向用户提问: %s (step_complete=%s)", question[:100], decision.step_complete)
         # 合并 observation + 引导问题为一条消息
         content = f"{obs_text}\n\n{question}".strip() if obs_text else question
         writer({"type": "response", "content": content})
-        next_step = state.get("current_step", 0) + 1
-        return {"response": question, "current_step": next_step, "observation_text": None}
+        result: dict = {"response": question, "observation_text": None}
+        if decision.step_complete:
+            # 步骤已完成（如连接成功后问选哪个表）→ 标记完成并推进
+            plan = state.get("plan", [])
+            current_step = state.get("current_step", 0)
+            if current_step < len(plan):
+                plan[current_step].status = "completed"
+            result["current_step"] = current_step + 1
+            logger.info("[replanner] 步骤已完成，推进到步骤 %d", current_step + 1)
+        else:
+            # 步骤未完成（如等待用户确认 SQL）→ 停留在当前步骤
+            logger.info("[replanner] 步骤未完成，停留在当前步骤")
+        return result
 
     if decision.action == "replan" and decision.updated_plan:
         new_steps = [ETLStep(**s) for s in decision.updated_plan] if isinstance(decision.updated_plan[0], dict) else decision.updated_plan
@@ -213,11 +222,14 @@ async def replanner(state: ETLState) -> dict:
             "observation_text": None,
         }
 
-    # continue: 前进到下一步（自动继续，不暂停）
-    next_step = state.get("current_step", 0) + 1
+    # continue: 标记当前步骤完成，前进到下一步
+    # 不发送 response 给客户端（continue 是内部转场，最终由 ask_user/respond 统一发送）
+    plan = state.get("plan", [])
+    current_step = state.get("current_step", 0)
+    if current_step < len(plan):
+        plan[current_step].status = "completed"
+    next_step = current_step + 1
     logger.info("[replanner] 继续执行，前进到步骤 %d", next_step)
-    if obs_text:
-        writer({"type": "response", "content": obs_text})
     return {
         "current_step": next_step,
         "response": None,

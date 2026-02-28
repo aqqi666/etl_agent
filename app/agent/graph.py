@@ -23,10 +23,17 @@ def route_entry(state: ETLState) -> str:
 
 
 def route_after_replan(state: ETLState) -> str:
-    """replanner 之后的路由：有 response 则结束，否则继续执行"""
-    target = "end" if state.get("response") else "executor"
-    logger.debug("[graph] replanner 路由 -> %s", target)
-    return target
+    """replanner 之后的路由：有 response 则结束，步骤越界则结束，否则继续执行"""
+    if state.get("response"):
+        logger.debug("[graph] replanner 路由 -> end（有 response）")
+        return "end"
+    plan = state.get("plan", [])
+    current_step = state.get("current_step", 0)
+    if current_step >= len(plan):
+        logger.warning("[graph] replanner 路由 -> end（步骤越界: %d >= %d）", current_step, len(plan))
+        return "end"
+    logger.debug("[graph] replanner 路由 -> executor")
+    return "executor"
 
 
 def build_graph():
