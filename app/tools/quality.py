@@ -2,26 +2,27 @@ import logging
 
 from langchain_core.tools import tool
 
-from app.db.executor import execute_sql_query
+from app.db.executor import execute_sql_query, resolve_connection
 
 logger = logging.getLogger(__name__)
 
 
 @tool
-def check_data_quality(connection_string: str, database: str, table: str) -> str:
-    """检查目标表的数据质量：总行数、空值统计、重复行等。"""
+def check_data_quality(database: str, table: str, connection_string: str = "") -> str:
+    """检查目标表的数据质量：总行数、空值统计、重复行等。connection_string 可不传，自动使用已建立的连接。"""
     logger.info("[tool:check_data_quality] 检查 %s.%s 数据质量", database, table)
     try:
+        conn_str = resolve_connection(connection_string or None)
         # 总行数
         count_result = execute_sql_query(
-            connection_string,
+            conn_str,
             f"SELECT COUNT(*) AS total FROM `{database}`.`{table}`",
         )
         total = count_result[0]["total"]
 
         # 获取列信息
         columns_result = execute_sql_query(
-            connection_string,
+            conn_str,
             f"SHOW COLUMNS FROM `{database}`.`{table}`",
         )
         columns = [r["Field"] for r in columns_result]
@@ -32,7 +33,7 @@ def check_data_quality(connection_string: str, database: str, table: str) -> str
             for c in columns
         )
         null_result = execute_sql_query(
-            connection_string,
+            conn_str,
             f"SELECT {null_checks} FROM `{database}`.`{table}`",
         )
         null_row = null_result[0] if null_result else {}

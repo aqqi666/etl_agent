@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import traceback
-import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import AIMessageChunk, HumanMessage
@@ -21,15 +19,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
     logger.info("[session=%s] WebSocket 连接已建立", session_id)
 
-    # 每个 session 维护独立的 graph 状态
-    graph_state = {
-        "messages": [],
-        "plan": [],
-        "current_step": 0,
-        "past_steps": [],
-        "artifacts": ETLArtifacts(),
-        "response": None,
-    }
+    # 使用 checkpointer 的 thread_id 让 graph 自动管理状态
+    config = {"configurable": {"thread_id": session_id}}
 
     try:
         while True:
@@ -49,13 +40,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             logger.info("[session=%s] 收到用户消息: %s", session_id, content[:200])
 
-            # 添加用户消息，清除上一轮 response
-            graph_state["messages"].append(HumanMessage(content=content))
-            graph_state["response"] = None
-
             try:
+                # 只传增量输入，由 checkpointer 自动管理累积 state
+                graph_input = {
+                    "messages": [HumanMessage(content=content)],
+                    "response": None,  # 清除上一轮的 response，让 graph 能重新进入
+                }
+
                 async for stream_mode, chunk in etl_graph.astream(
-                    graph_state,
+                    graph_input,
+                    config=config,
                     stream_mode=["messages", "updates", "custom"],
                 ):
                     if stream_mode == "messages":
@@ -82,13 +76,23 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         await websocket.send_json(chunk)
 
                     elif stream_mode == "updates":
-                        # 节点状态更新 — 同步 graph_state
+                        # 推送步骤进度信息
                         if isinstance(chunk, dict):
                             for node_name, node_output in chunk.items():
                                 if isinstance(node_output, dict):
-                                    for k, v in node_output.items():
-                                        if k in graph_state:
-                                            graph_state[k] = v
+                                    # 推送步骤进度
+                                    if "current_step" in node_output and "plan" not in node_output:
+                                        # 获取当前 state 来读取 plan
+                                        snapshot = etl_graph.get_state(config)
+                                        plan = snapshot.values.get("plan", [])
+                                        step_idx = node_output["current_step"]
+                                        if step_idx < len(plan):
+                                            await websocket.send_json({
+                                                "type": "step_progress",
+                                                "current_step": step_idx + 1,
+                                                "total_steps": len(plan),
+                                                "title": plan[step_idx].title,
+                                            })
 
                 logger.info("[session=%s] 本轮 agent 流程完成", session_id)
                 await websocket.send_json({"type": "done"})

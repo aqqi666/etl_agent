@@ -42,8 +42,12 @@ async def planner(state: ETLState) -> dict:
     logger.info("[planner] 开始生成 ETL 计划")
     llm = _get_llm().with_structured_output(ETLPlan, method="function_calling")
     artifacts = state.get("artifacts", ETLArtifacts())
+    past_steps = state.get("past_steps", [])
 
-    prompt = PLANNER_PROMPT.format(artifacts_json=_artifacts_json(artifacts))
+    prompt = PLANNER_PROMPT.format(
+        artifacts_json=_artifacts_json(artifacts),
+        past_steps_json=json.dumps(past_steps, ensure_ascii=False, indent=2) if past_steps else "无",
+    )
     messages = [SystemMessage(content=prompt)] + state["messages"]
 
     plan: ETLPlan = await llm.ainvoke(messages)
@@ -87,7 +91,10 @@ async def executor(state: ETLState) -> dict:
     llm = _get_llm()
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
-    prompt = EXECUTOR_PROMPT.format(current_step_description=step_desc)
+    prompt = EXECUTOR_PROMPT.format(
+        current_step_description=step_desc,
+        artifacts_json=_artifacts_json(artifacts),
+    )
     messages = [SystemMessage(content=prompt)] + state["messages"]
 
     response: AIMessage = await llm_with_tools.ainvoke(messages)
@@ -159,17 +166,17 @@ async def observer(state: ETLState) -> dict:
 def _render_observation(obs: StepObservation) -> str:
     parts = [f"### {obs.summary}\n"]
     if obs.sql_executed:
-        parts.append(f"**执行的 SQL:**\n```sql\n{obs.sql_executed}\n```\n")
+        parts.append(f"验证 SQL：\n```sql\n{obs.sql_executed}\n```\n")
     if obs.result_display:
-        parts.append(f"**结果:**\n{obs.result_display}\n")
+        parts.append(f"实际返回：\n{obs.result_display}\n")
     if obs.sql_status:
-        parts.append(f"**状态:** {obs.sql_status}\n")
+        parts.append(f"SQL 返回码：{obs.sql_status}\n")
     if obs.analysis:
         parts.append(f"**分析:** {obs.analysis}\n")
     if obs.sql_explanation:
         parts.append(f"**SQL 解释:**\n{obs.sql_explanation}\n")
     if obs.next_step_hint:
-        parts.append(f"**下一步:** {obs.next_step_hint}\n")
+        parts.append(f"\n{obs.next_step_hint}\n")
     if obs.missing_info:
         parts.append("**需要补充的信息:**\n" + "\n".join(f"- {i}" for i in obs.missing_info) + "\n")
     return "\n".join(parts)
@@ -208,7 +215,9 @@ async def replanner(state: ETLState) -> dict:
         question = decision.question or "请提供更多信息。"
         logger.info("[replanner] 向用户提问: %s", question[:100])
         writer({"type": "text_delta", "content": question})
-        return {"response": question}
+        # 推进到下一步，用户回复后直接执行下一步
+        next_step = state.get("current_step", 0) + 1
+        return {"response": question, "current_step": next_step}
 
     if decision.action == "replan" and decision.updated_plan:
         new_steps = [ETLStep(**s) for s in decision.updated_plan] if isinstance(decision.updated_plan[0], dict) else decision.updated_plan

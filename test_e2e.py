@@ -1,10 +1,10 @@
 """端到端测试：模拟用户通过 WebSocket 与 ETL Agent 交互"""
 
 import json
-import sys
+
 import websocket
 
-WS_URL = "ws://localhost:8001/ws/test-session-1"
+WS_URL = "ws://localhost:8001/ws/test-session-3"
 CONN_STR = "mysql+pymysql://root:test123@127.0.0.1:3307/source_db"
 
 TIMEOUT = 90  # 单轮最大等待秒数
@@ -12,9 +12,9 @@ TIMEOUT = 90  # 单轮最大等待秒数
 
 def send_and_receive(ws, content: str):
     """发送一条消息，收集所有响应直到 done/error"""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[用户]: {content}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     ws.send(json.dumps({"type": "chat", "content": content}))
 
@@ -33,7 +33,9 @@ def send_and_receive(ws, content: str):
             elif msg_type == "observation":
                 print(f"\n[分析结果]:\n{msg_content}")
             elif msg_type == "tool_call":
-                name = msg_content.get("name", "") if isinstance(msg_content, dict) else ""
+                name = (
+                    msg_content.get("name", "") if isinstance(msg_content, dict) else ""
+                )
                 if name:
                     print(f"\n[工具调用]: {name}")
             elif msg_type == "done":
@@ -54,10 +56,16 @@ def main():
 
     try:
         # 测试1: 连接数据库
-        send_and_receive(ws, f"连接数据库 {CONN_STR}")
+        ok = send_and_receive(ws, f"连接数据库 {CONN_STR}")
+        if not ok:
+            print("测试1失败，终止")
+            return
 
-        # 测试2: 查看源表
-        send_and_receive(ws, "用 source_db.orders 表做数据加工")
+        # 测试2: 选择基表
+        ok = send_and_receive(ws, "用 source_db.orders 表做数据加工")
+        if not ok:
+            print("测试2失败，终止")
+            return
 
     finally:
         ws.close()

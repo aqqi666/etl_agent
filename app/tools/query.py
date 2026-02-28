@@ -2,21 +2,22 @@ import logging
 
 from langchain_core.tools import tool
 
-from app.db.executor import execute_sql_query
+from app.db.executor import execute_sql_query, resolve_connection
 
 logger = logging.getLogger(__name__)
 
 
 @tool
-def execute_query(connection_string: str, sql: str) -> str:
-    """执行只读 SQL 查询（SELECT），返回结果。用于数据预览和分析。"""
+def execute_query(sql: str, connection_string: str = "") -> str:
+    """执行只读 SQL 查询（SELECT），返回结果。用于数据预览和分析。connection_string 可不传，自动使用已建立的连接。"""
     logger.info("[tool:execute_query] SQL: %s", sql[:300])
     try:
+        conn_str = resolve_connection(connection_string or None)
         sql_upper = sql.strip().upper()
         if not sql_upper.startswith("SELECT") and not sql_upper.startswith("SHOW") and not sql_upper.startswith("DESC"):
             logger.warning("[tool:execute_query] 拒绝非只读 SQL")
             return "错误: 此工具仅支持 SELECT/SHOW/DESC 查询，修改操作请使用 execute_sql"
-        rows = execute_sql_query(connection_string, sql)
+        rows = execute_sql_query(conn_str, sql)
         if not rows:
             logger.info("[tool:execute_query] 查询返回 0 行")
             return "查询返回 0 行数据"
@@ -35,12 +36,13 @@ def execute_query(connection_string: str, sql: str) -> str:
 
 
 @tool
-def preview_data(connection_string: str, database: str, table: str, limit: int = 10) -> str:
-    """预览表中的前 N 行数据。"""
+def preview_data(database: str, table: str, limit: int = 10, connection_string: str = "") -> str:
+    """预览表中的前 N 行数据。connection_string 可不传，自动使用已建立的连接。"""
     logger.info("[tool:preview_data] 预览 %s.%s 前 %d 行", database, table, limit)
     try:
+        conn_str = resolve_connection(connection_string or None)
         rows = execute_sql_query(
-            connection_string,
+            conn_str,
             f"SELECT * FROM `{database}`.`{table}` LIMIT {limit}",
         )
         if not rows:

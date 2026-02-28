@@ -6,11 +6,31 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger(__name__)
 
 _engines: dict[str, Engine] = {}
+_current_connection: str | None = None
+
+
+def get_current_connection() -> str | None:
+    """获取当前活跃的连接串"""
+    return _current_connection
+
+
+def set_current_connection(connection_string: str) -> None:
+    """设置当前活跃的连接串"""
+    global _current_connection
+    _current_connection = connection_string
+
+
+def resolve_connection(connection_string: str | None) -> str:
+    """解析连接串：有传入则用传入的，否则用当前活跃连接"""
+    if connection_string:
+        return connection_string
+    if _current_connection:
+        return _current_connection
+    raise ValueError("没有可用的数据库连接，请先调用 test_connection 建立连接")
 
 
 def get_engine(connection_string: str) -> Engine:
     if connection_string not in _engines:
-        # 日志中隐藏密码
         safe_conn = connection_string.split("@")[-1] if "@" in connection_string else connection_string
         logger.info("[db] 创建新数据库引擎: %s", safe_conn)
         _engines[connection_string] = create_engine(
@@ -41,5 +61,6 @@ def test_db_connection(connection_string: str) -> dict:
     engine = get_engine(connection_string)
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
-    logger.info("[db] 连接测试成功")
+    set_current_connection(connection_string)
+    logger.info("[db] 连接测试成功，已设为当前活跃连接")
     return {"status": "ok", "message": "连接成功"}
