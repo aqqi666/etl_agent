@@ -222,16 +222,18 @@ async def replanner(state: ETLState) -> dict:
             "observation_text": None,
         }
 
-    # continue: 标记当前步骤完成，前进到下一步
-    # 不发送 response 给客户端（continue 是内部转场，最终由 ask_user/respond 统一发送）
+    # fallback（含 continue）：当作 ask_user + step_complete=true 处理
+    # 对话式流程不应跳过用户，始终回到用户
+    logger.warning("[replanner] 未预期的 action=%s，fallback 为 ask_user", decision.action)
+    question = decision.question or "请告诉我下一步需要做什么。"
+    content = f"{obs_text}\n\n{question}".strip() if obs_text else question
+    writer({"type": "response", "content": content})
     plan = state.get("plan", [])
     current_step = state.get("current_step", 0)
     if current_step < len(plan):
         plan[current_step].status = "completed"
-    next_step = current_step + 1
-    logger.info("[replanner] 继续执行，前进到步骤 %d", next_step)
     return {
-        "current_step": next_step,
-        "response": None,
+        "response": question,
+        "current_step": current_step + 1,
         "observation_text": None,
     }
