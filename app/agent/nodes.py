@@ -149,13 +149,12 @@ async def observer(state: ETLState) -> dict:
     if current_step < len(plan):
         plan[current_step].status = "completed"
 
-    # 通过 stream writer 推送结构化结果
-    writer = get_stream_writer()
+    # 渲染结果存入 state，由 replanner 合并后推送
     observation_md = _render_observation(observation)
-    writer({"type": "observation", "content": observation_md})
 
     return {
         "artifacts": updated,
+        "observation_text": observation_md,
         "past_steps": [(
             plan[current_step].title if current_step < len(plan) else "unknown",
             observation.summary,
@@ -205,33 +204,44 @@ async def replanner(state: ETLState) -> dict:
     logger.info("[replanner] 决策结果: action=%s", decision.action)
 
     writer = get_stream_writer()
+    obs_text = state.get("observation_text") or ""
 
     if decision.action == "respond":
         logger.info("[replanner] 流程结束，生成最终响应")
-        writer({"type": "text_delta", "content": decision.response or "ETL 流程已完成。"})
-        return {"response": decision.response or "ETL 流程已完成。"}
+        final_text = decision.response or "ETL 流程已完成。"
+        # 合并 observation + 总结
+        content = f"{obs_text}\n\n{final_text}".strip() if obs_text else final_text
+        writer({"type": "response", "content": content})
+        return {"response": final_text, "observation_text": None}
 
     if decision.action == "ask_user":
         question = decision.question or "请提供更多信息。"
         logger.info("[replanner] 向用户提问: %s", question[:100])
-        writer({"type": "text_delta", "content": question})
-        # 推进到下一步，用户回复后直接执行下一步
+        # 合并 observation + 引导问题为一条消息
+        content = f"{obs_text}\n\n{question}".strip() if obs_text else question
+        writer({"type": "response", "content": content})
         next_step = state.get("current_step", 0) + 1
-        return {"response": question, "current_step": next_step}
+        return {"response": question, "current_step": next_step, "observation_text": None}
 
     if decision.action == "replan" and decision.updated_plan:
         new_steps = [ETLStep(**s) for s in decision.updated_plan] if isinstance(decision.updated_plan[0], dict) else decision.updated_plan
         logger.info("[replanner] 重新规划，新计划包含 %d 个步骤", len(new_steps))
+        if obs_text:
+            writer({"type": "response", "content": obs_text})
         return {
             "plan": new_steps,
             "current_step": 0,
             "response": None,
+            "observation_text": None,
         }
 
-    # continue: 前进到下一步
+    # continue: 前进到下一步（自动继续，不暂停）
     next_step = state.get("current_step", 0) + 1
     logger.info("[replanner] 继续执行，前进到步骤 %d", next_step)
+    if obs_text:
+        writer({"type": "response", "content": obs_text})
     return {
         "current_step": next_step,
         "response": None,
+        "observation_text": None,
     }

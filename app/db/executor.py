@@ -29,12 +29,20 @@ def resolve_connection(connection_string: str | None) -> str:
     raise ValueError("没有可用的数据库连接，请先调用 test_connection 建立连接")
 
 
+def _ensure_charset(connection_string: str) -> str:
+    """确保连接串包含 charset=utf8mb4"""
+    if "charset=" not in connection_string:
+        sep = "&" if "?" in connection_string else "?"
+        return f"{connection_string}{sep}charset=utf8mb4"
+    return connection_string
+
+
 def get_engine(connection_string: str) -> Engine:
     if connection_string not in _engines:
         safe_conn = connection_string.split("@")[-1] if "@" in connection_string else connection_string
         logger.info("[db] 创建新数据库引擎: %s", safe_conn)
         _engines[connection_string] = create_engine(
-            connection_string, pool_pre_ping=True, pool_size=5
+            _ensure_charset(connection_string), pool_pre_ping=True, pool_size=5
         )
     return _engines[connection_string]
 
