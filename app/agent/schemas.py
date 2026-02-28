@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import json
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.agent.state import ETLStep
 
@@ -24,6 +26,32 @@ class StepObservation(BaseModel):
     next_step_hint: str
     missing_info: list[str] | None = None
     artifacts_update: dict = Field(default_factory=dict)
+
+    @field_validator("missing_info", mode="before")
+    @classmethod
+    def parse_missing_info(cls, v):
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return [v]
+        return v
+
+    @field_validator("artifacts_update", mode="before")
+    @classmethod
+    def parse_artifacts_update(cls, v):
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return {}
+        return v
 
 
 class ReplanDecision(BaseModel):
