@@ -1,3 +1,5 @@
+import logging
+
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -5,15 +7,18 @@ from app.agent.nodes import executor, observer, planner, replanner
 from app.agent.state import ETLArtifacts, ETLState
 from app.tools import ALL_TOOLS
 
+logger = logging.getLogger(__name__)
+
 
 def route_after_replan(state: ETLState) -> str:
     """replanner 之后的路由：有 response 则结束，否则继续执行"""
-    if state.get("response"):
-        return "end"
-    return "executor"
+    target = "end" if state.get("response") else "executor"
+    logger.debug("[graph] replanner 路由 -> %s", target)
+    return target
 
 
 def build_graph():
+    logger.info("[graph] 开始构建 ETL Agent 流程图")
     tool_node = ToolNode(ALL_TOOLS)
 
     graph = StateGraph(ETLState)
@@ -49,7 +54,9 @@ def build_graph():
         {"executor": "executor", "end": END},
     )
 
-    return graph.compile()
+    compiled = graph.compile()
+    logger.info("[graph] ETL Agent 流程图构建完成")
+    return compiled
 
 
 # 编译好的 graph 实例

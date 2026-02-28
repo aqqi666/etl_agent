@@ -1,10 +1,16 @@
+import logging
+
 from langchain_core.tools import tool
+
 from app.db.executor import execute_sql_query
+
+logger = logging.getLogger(__name__)
 
 
 @tool
 def check_data_quality(connection_string: str, database: str, table: str) -> str:
     """检查目标表的数据质量：总行数、空值统计、重复行等。"""
+    logger.info("[tool:check_data_quality] 检查 %s.%s 数据质量", database, table)
     try:
         # 总行数
         count_result = execute_sql_query(
@@ -44,6 +50,8 @@ def check_data_quality(connection_string: str, database: str, table: str) -> str
             rate = f"{nulls / total * 100:.1f}%" if total > 0 else "N/A"
             lines.append(f"| {c} | {nulls} | {rate} |")
 
+        logger.info("[tool:check_data_quality] 检查完成，总行数: %d", total)
         return "\n".join(lines)
     except Exception as e:
+        logger.error("[tool:check_data_quality] 失败: %s", e)
         return f"数据质量检查失败: {e}"

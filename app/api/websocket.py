@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import traceback
 import uuid
 
@@ -10,12 +11,15 @@ from langchain_core.messages import AIMessageChunk, HumanMessage
 from app.agent.graph import etl_graph
 from app.agent.state import ETLArtifacts
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
+    logger.info("[session=%s] WebSocket 连接已建立", session_id)
 
     # 每个 session 维护独立的 graph 状态
     graph_state = {
@@ -33,6 +37,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
+                logger.warning("[session=%s] 收到无效 JSON: %s", session_id, raw[:200])
                 await websocket.send_json({"type": "error", "content": "无效的 JSON 格式"})
                 continue
 
@@ -41,6 +46,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             if msg_type != "chat" or not content.strip():
                 continue
+
+            logger.info("[session=%s] 收到用户消息: %s", session_id, content[:200])
 
             # 添加用户消息，清除上一轮 response
             graph_state["messages"].append(HumanMessage(content=content))
@@ -83,14 +90,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                                         if k in graph_state:
                                             graph_state[k] = v
 
+                logger.info("[session=%s] 本轮 agent 流程完成", session_id)
                 await websocket.send_json({"type": "done"})
 
             except Exception as e:
-                traceback.print_exc()
+                logger.exception("[session=%s] agent 处理异常", session_id)
                 await websocket.send_json({
                     "type": "error",
                     "content": f"处理出错: {e}",
                 })
 
     except WebSocketDisconnect:
-        pass
+        logger.info("[session=%s] WebSocket 连接已断开", session_id)
