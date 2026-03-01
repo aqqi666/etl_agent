@@ -9,13 +9,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
 
-from app.agent.schemas import ETLPlan, ReplanDecision, StepObservation
+from app.agent.schemas import ETLPlan, StepResult
 from app.agent.state import ETLArtifacts, ETLState, ETLStep
 from app.agent.system_prompt import (
+    ANALYZER_PROMPT,
     EXECUTOR_PROMPT,
-    OBSERVER_PROMPT,
     PLANNER_PROMPT,
-    REPLANNER_PROMPT,
 )
 from app.config import settings
 from app.tools import ALL_TOOLS
@@ -170,14 +169,17 @@ async def executor(state: ETLState) -> dict:
     return {"messages": [response]}
 
 
-# ── observer ─────────────────────────────────────────────────────────
+# ── analyzer（合并 observer + replanner）────────────────────────────
 
 
-async def observer(state: ETLState) -> dict:
-    """分析 tool 执行结果，生成结构化输出，更新 artifacts"""
-    logger.info("[observer] 开始分析工具执行结果")
-    llm = _get_llm("observer").with_structured_output(StepObservation, method="function_calling")
+async def analyzer(state: ETLState) -> dict:
+    """分析工具执行结果 + 决策下一步行动（合并原 observer 和 replanner）"""
+    logger.info("[analyzer] 开始分析结果并决策")
+    llm = _get_llm("observer").with_structured_output(StepResult, method="function_calling")
     artifacts = state.get("artifacts", ETLArtifacts())
+    plan = state.get("plan", [])
+    current_step = state.get("current_step", 0)
+    past_steps = state.get("past_steps", [])
 
     # 收集最近的 tool 结果
     tool_results = []
@@ -187,115 +189,85 @@ async def observer(state: ETLState) -> dict:
         elif msg.type == "ai" and not getattr(msg, "tool_calls", None):
             break
 
-    prompt = OBSERVER_PROMPT.format(
+    prompt = ANALYZER_PROMPT.format(
+        plan_json=json.dumps([s.model_dump() for s in plan], ensure_ascii=False, indent=2),
+        past_steps_json=json.dumps(past_steps, ensure_ascii=False, indent=2),
         artifacts_json=_artifacts_json(artifacts),
         tool_results="\n\n".join(tool_results) if tool_results else "无工具调用结果",
     )
     messages = [SystemMessage(content=prompt)] + state["messages"]
 
-    observation: StepObservation = await llm.ainvoke(messages)
+    result: StepResult = await llm.ainvoke(messages)
 
-    logger.info("[observer] 观察摘要: %s", observation.summary)
-    if observation.sql_status:
-        logger.info("[observer] SQL 状态: %s", observation.sql_status)
+    logger.info("[analyzer] 摘要: %s | action=%s", result.summary, result.action)
 
     # 更新 artifacts
-    if observation.artifacts_update:
-        updated = artifacts.model_copy(update=observation.artifacts_update)
+    if result.artifacts_update:
+        updated_artifacts = artifacts.model_copy(update=result.artifacts_update)
     else:
-        updated = artifacts
+        updated_artifacts = artifacts
 
-    # 不在 observer 中标记步骤完成，由 replanner 的 continue 决定
-    plan = state.get("plan", [])
-    current_step = state.get("current_step", 0)
-
-    return {
-        "artifacts": updated,
-        "observation_text": observation.display_text,
-        "past_steps": [(
-            plan[current_step].title if current_step < len(plan) else "unknown",
-            observation.summary,
-        )],
-    }
-
-
-# ── replanner ────────────────────────────────────────────────────────
-
-
-async def replanner(state: ETLState) -> dict:
-    """决定下一步：继续 / 调整计划 / 结束 / 提问"""
-    logger.info("[replanner] 开始决策下一步行动")
-    llm = _get_llm("replanner").with_structured_output(ReplanDecision, method="function_calling")
-    artifacts = state.get("artifacts", ETLArtifacts())
-    plan = state.get("plan", [])
-    past_steps = state.get("past_steps", [])
-
-    prompt = REPLANNER_PROMPT.format(
-        plan_json=json.dumps([s.model_dump() for s in plan], ensure_ascii=False, indent=2),
-        past_steps_json=json.dumps(past_steps, ensure_ascii=False, indent=2),
-        artifacts_json=_artifacts_json(artifacts),
-    )
-    messages = [SystemMessage(content=prompt)] + state["messages"]
-
-    decision: ReplanDecision = await llm.ainvoke(messages)
-
-    logger.info("[replanner] 决策结果: action=%s", decision.action)
+    # 记录已完成步骤
+    step_title = plan[current_step].title if current_step < len(plan) else "unknown"
 
     writer = get_stream_writer()
-    obs_text = state.get("observation_text") or ""
+    display = result.display_text or ""
 
-    if decision.action == "respond":
-        logger.info("[replanner] 流程结束，生成最终响应")
-        final_text = decision.response or "ETL 流程已完成。"
-        # 合并 observation + 总结
-        content = f"{obs_text}\n\n{final_text}".strip() if obs_text else final_text
-        writer({"type": "response", "content": content})
-        return {"response": final_text, "observation_text": None}
+    # ── 根据 action 处理 ──
 
-    if decision.action == "ask_user":
-        question = decision.question or "请提供更多信息。"
-        logger.info("[replanner] 向用户提问: %s (step_complete=%s)", question[:100], decision.step_complete)
-        # 合并 observation + 引导问题为一条消息
-        content = f"{obs_text}\n\n{question}".strip() if obs_text else question
+    if result.action == "respond":
+        logger.info("[analyzer] 流程结束，生成最终响应")
+        final_text = result.response or "ETL 流程已完成。"
+        content = f"{display}\n\n{final_text}".strip() if display else final_text
         writer({"type": "response", "content": content})
-        result: dict = {"response": question, "observation_text": None}
-        if decision.step_complete:
-            # 步骤已完成（如连接成功后问选哪个表）→ 标记完成并推进
-            plan = state.get("plan", [])
-            current_step = state.get("current_step", 0)
+        return {
+            "artifacts": updated_artifacts,
+            "past_steps": [(step_title, result.summary)],
+            "response": final_text,
+        }
+
+    if result.action == "ask_user":
+        question = result.question or "请提供更多信息。"
+        logger.info("[analyzer] 向用户提问: %s (step_complete=%s)", question[:100], result.step_complete)
+        content = f"{display}\n\n{question}".strip() if display else question
+        writer({"type": "response", "content": content})
+        state_update: dict = {
+            "artifacts": updated_artifacts,
+            "past_steps": [(step_title, result.summary)],
+            "response": question,
+        }
+        if result.step_complete:
             if current_step < len(plan):
                 plan[current_step].status = "completed"
-            result["current_step"] = current_step + 1
-            logger.info("[replanner] 步骤已完成，推进到步骤 %d", current_step + 1)
+            state_update["current_step"] = current_step + 1
+            logger.info("[analyzer] 步骤已完成，推进到步骤 %d", current_step + 1)
         else:
-            # 步骤未完成（如等待用户确认 SQL）→ 停留在当前步骤
-            logger.info("[replanner] 步骤未完成，停留在当前步骤")
-        return result
+            logger.info("[analyzer] 步骤未完成，停留在当前步骤")
+        return state_update
 
-    if decision.action == "replan" and decision.updated_plan:
-        new_steps = [ETLStep(**s) for s in decision.updated_plan] if isinstance(decision.updated_plan[0], dict) else decision.updated_plan
-        logger.info("[replanner] 重新规划，新计划包含 %d 个步骤", len(new_steps))
-        if obs_text:
-            writer({"type": "response", "content": obs_text})
+    if result.action == "replan" and result.updated_plan:
+        new_steps = [ETLStep(**s) for s in result.updated_plan] if isinstance(result.updated_plan[0], dict) else result.updated_plan
+        logger.info("[analyzer] 重新规划，新计划包含 %d 个步骤", len(new_steps))
+        if display:
+            writer({"type": "response", "content": display})
         return {
+            "artifacts": updated_artifacts,
+            "past_steps": [(step_title, result.summary)],
             "plan": new_steps,
             "current_step": 0,
             "response": None,
-            "observation_text": None,
         }
 
-    # fallback（含 continue）：当作 ask_user + step_complete=true 处理
-    # 对话式流程不应跳过用户，始终回到用户
-    logger.warning("[replanner] 未预期的 action=%s，fallback 为 ask_user", decision.action)
-    question = decision.question or "请告诉我下一步需要做什么。"
-    content = f"{obs_text}\n\n{question}".strip() if obs_text else question
+    # fallback：当作 ask_user + step_complete=true 处理
+    logger.warning("[analyzer] 未预期的 action=%s，fallback 为 ask_user", result.action)
+    question = result.question or "请告诉我下一步需要做什么。"
+    content = f"{display}\n\n{question}".strip() if display else question
     writer({"type": "response", "content": content})
-    plan = state.get("plan", [])
-    current_step = state.get("current_step", 0)
     if current_step < len(plan):
         plan[current_step].status = "completed"
     return {
+        "artifacts": updated_artifacts,
+        "past_steps": [(step_title, result.summary)],
         "response": question,
         "current_step": current_step + 1,
-        "observation_text": None,
     }

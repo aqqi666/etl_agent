@@ -5,7 +5,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import tools_condition
 
-from app.agent.nodes import executor, observer, parallel_tool_node, planner, replanner
+from app.agent.nodes import analyzer, executor, parallel_tool_node, planner
 from app.agent.state import ETLState
 
 logger = logging.getLogger(__name__)
@@ -21,17 +21,17 @@ def route_entry(state: ETLState) -> str:
     return "planner"
 
 
-def route_after_replan(state: ETLState) -> str:
-    """replanner 之后的路由：有 response 则结束，步骤越界则结束，否则继续执行"""
+def route_after_analyzer(state: ETLState) -> str:
+    """analyzer 之后的路由：有 response 则结束，步骤越界则结束，否则继续执行"""
     if state.get("response"):
-        logger.debug("[graph] replanner 路由 -> end（有 response）")
+        logger.debug("[graph] analyzer 路由 -> end（有 response）")
         return "end"
     plan = state.get("plan", [])
     current_step = state.get("current_step", 0)
     if current_step >= len(plan):
-        logger.warning("[graph] replanner 路由 -> end（步骤越界: %d >= %d）", current_step, len(plan))
+        logger.warning("[graph] analyzer 路由 -> end（步骤越界: %d >= %d）", current_step, len(plan))
         return "end"
-    logger.debug("[graph] replanner 路由 -> executor")
+    logger.debug("[graph] analyzer 路由 -> executor")
     return "executor"
 
 
@@ -44,8 +44,7 @@ def build_graph():
     graph.add_node("planner", planner)
     graph.add_node("executor", executor)
     graph.add_node("tools", parallel_tool_node)
-    graph.add_node("observer", observer)
-    graph.add_node("replanner", replanner)
+    graph.add_node("analyzer", analyzer)
 
     # 入口路由：区分首次规划和用户回复后继续
     graph.add_conditional_edges(
@@ -53,23 +52,20 @@ def build_graph():
     )
     graph.add_edge("planner", "executor")
 
-    # executor → tools_condition（有 tool_call 则走 tools，否则走 observer）
+    # executor → tools_condition（有 tool_call 则走 tools，否则走 analyzer）
     graph.add_conditional_edges(
         "executor",
         tools_condition,
-        {"tools": "tools", "__end__": "observer"},
+        {"tools": "tools", "__end__": "analyzer"},
     )
 
     # tools → executor（ReAct 循环）
     graph.add_edge("tools", "executor")
 
-    # observer → replanner
-    graph.add_edge("observer", "replanner")
-
-    # replanner → executor 或 END
+    # analyzer → executor 或 END
     graph.add_conditional_edges(
-        "replanner",
-        route_after_replan,
+        "analyzer",
+        route_after_analyzer,
         {"executor": "executor", "end": END},
     )
 

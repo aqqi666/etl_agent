@@ -43,4 +43,3 @@ class ETLState(TypedDict):
     past_steps: Annotated[list[tuple[str, str]], operator.add]
     artifacts: ETLArtifacts
     response: str | None
-    observation_text: str | None  # observer 渲染的结果，供 replanner 合并推送

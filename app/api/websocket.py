@@ -113,9 +113,8 @@ async def _try_fast_confirm(
             "plan": plan,
             "past_steps": [(step_title, step_summary)],
             "response": response_text,
-            "observation_text": None,
         },
-        as_node="replanner",
+        as_node="analyzer",
     )
 
     await websocket.send_json({"type": "response", "content": response_text})
