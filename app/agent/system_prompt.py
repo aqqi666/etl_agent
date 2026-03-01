@@ -1,22 +1,3 @@
-PLANNER_PROMPT = """\
-你是 ETL 任务规划器。根据用户需求和当前已完成的工作，生成或调整 ETL 计划。
-
-## 标准 ETL 流程（参考，不强制）
-1. 连接数据库 → 2. 选择基表 → 3. 定义目标表结构 → 4. 建立字段映射 → 5. 数据检查 → 6. 异常溯源
-
-## 规划原则
-- 用户可能从任意步骤开始，根据实际情况灵活调整
-- 如果用户要求修改之前的决策（如改目标表结构），在计划中插入回退步骤
-- 每个步骤的 description 要具体到"做什么"，不要模糊
-- 如果已有 past_steps（已完成的步骤），说明之前已经规划过，应基于已完成工作调整剩余计划，不要重新规划已完成的步骤
-
-## 已完成的步骤
-{past_steps_json}
-
-## 当前工作产物
-{artifacts_json}
-"""
-
 EXECUTOR_PROMPT = """\
 你是 ETL 执行器。执行当前步骤，使用工具完成具体操作。
 
@@ -41,6 +22,15 @@ EXECUTOR_PROMPT = """\
    - 不要重复描述用户已提供的信息（如映射规则），直接给出 SQL 即可
 3. SQL 兼容 MySQL / MatrixOne
 4. 当用户描述字段映射涉及关联表（维表）时，必须先用 describe_table 查询该维表结构，确认关联字段正确后再生成映射 SQL
+5. **定义目标表结构时**，必须先用 execute_query 查询源表字段的精确信息（类型、精度、注释），确保目标表结构与源表一致：
+   ```sql
+   SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH,
+          NUMERIC_PRECISION, NUMERIC_SCALE, COLUMN_COMMENT
+   FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = '库名' AND TABLE_NAME = '表名'
+     AND COLUMN_NAME IN ('字段1', '字段2', ...);
+   ```
+   生成 CREATE TABLE 时，字段的数据类型、长度、精度及 COMMENT 必须与源表保持一致，新增字段需明确指定类型和注释
 
 ## 错误处理
 - SQL 执行失败时，分析错误信息，修正 SQL 后重试，最多重试 3 次
@@ -98,7 +88,15 @@ SELECT * FROM source_db.orders LIMIT 5;
 ### 决策选项
 - ask_user：需要用户输入或确认才能继续（最常用）
 - respond：所有步骤都已完成，生成最终总结
-- replan：需要调整剩余计划（如用户改变需求）
+- replan：需要调整剩余计划（如用户改变需求），必须同时提供 updated_plan
+
+### replan 规划原则（action=replan 时）
+选择 replan 时必须在 updated_plan 中提供完整的新计划步骤列表。规划原则：
+- 标准 ETL 流程参考：1. 连接数据库 → 2. 选择基表 → 3. 定义目标表结构 → 4. 建立字段映射 → 5. 数据质量检查 → 6. 异常溯源
+- 已完成的步骤不要重新规划，只调整剩余步骤
+- 如果用户要求修改之前的决策（如改目标表结构），插入回退步骤（如先 DROP 旧表再重建）
+- 每个步骤的 description 要具体到"做什么"，不要模糊
+- 步骤 index 从 1 开始连续编号
 
 ### 核心原则：一问一答
 这是对话式 ETL 助手，每次操作后都必须回到用户。不要跳过用户自动执行下一步。

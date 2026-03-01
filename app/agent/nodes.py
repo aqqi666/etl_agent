@@ -9,13 +9,9 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
 
-from app.agent.schemas import ETLPlan, StepResult
+from app.agent.schemas import StepResult
 from app.agent.state import ETLArtifacts, ETLState, ETLStep
-from app.agent.system_prompt import (
-    ANALYZER_PROMPT,
-    EXECUTOR_PROMPT,
-    PLANNER_PROMPT,
-)
+from app.agent.system_prompt import ANALYZER_PROMPT, EXECUTOR_PROMPT
 from app.config import settings
 from app.tools import ALL_TOOLS
 
@@ -36,42 +32,6 @@ def _get_llm(role: str = "") -> ChatOpenAI:
 
 def _artifacts_json(artifacts: ETLArtifacts) -> str:
     return artifacts.model_dump_json(indent=2, exclude_none=True)
-
-
-# ── planner ──────────────────────────────────────────────────────────
-
-
-async def planner(state: ETLState) -> dict:
-    """生成或更新 ETL 计划"""
-    logger.info("[planner] 开始生成 ETL 计划")
-    llm = _get_llm("planner").with_structured_output(ETLPlan, method="function_calling")
-    artifacts = state.get("artifacts", ETLArtifacts())
-    past_steps = state.get("past_steps", [])
-
-    prompt = PLANNER_PROMPT.format(
-        artifacts_json=_artifacts_json(artifacts),
-        past_steps_json=json.dumps(past_steps, ensure_ascii=False, indent=2) if past_steps else "无",
-    )
-    messages = [SystemMessage(content=prompt)] + state["messages"]
-
-    plan: ETLPlan = await llm.ainvoke(messages)
-
-    logger.info("[planner] 生成计划包含 %d 个步骤", len(plan.steps))
-    for step in plan.steps:
-        logger.info("[planner]   步骤 %d: %s", step.index, step.title)
-
-    writer = get_stream_writer()
-    # 推送计划给前端
-    plan_text = "## ETL 计划\n\n"
-    for step in plan.steps:
-        plan_text += f"{step.index}. **{step.title}** — {step.description}\n"
-    writer({"type": "plan", "content": plan_text})
-
-    return {
-        "plan": plan.steps,
-        "current_step": 0,
-        "response": None,
-    }
 
 
 # ── parallel tool node ───────────────────────────────────────────────

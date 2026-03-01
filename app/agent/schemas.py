@@ -8,13 +8,6 @@ from pydantic import BaseModel, Field, field_validator
 from app.agent.state import ETLStep
 
 
-class ETLPlan(BaseModel):
-    """Planner 输出：ETL 执行计划"""
-
-    steps: list[ETLStep] = Field(description="ETL 计划的步骤列表，每个步骤包含序号、标题、描述和状态")
-    reasoning: str = Field(default="", description="生成此计划的推理过程")
-
-
 class StepResult(BaseModel):
     """Analyzer 输出：分析工具执行结果 + 决策下一步行动（合并原 Observer 和 Replanner）"""
 
