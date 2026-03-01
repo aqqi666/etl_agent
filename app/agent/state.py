@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -11,10 +11,10 @@ from pydantic import BaseModel, Field
 class ETLStep(BaseModel):
     """ETL 计划中的一个步骤"""
 
-    index: int
-    title: str
-    description: str
-    status: str = "pending"  # pending / in_progress / completed / skipped
+    index: int = Field(description="步骤序号，从 1 开始")
+    title: str = Field(description="步骤标题，简明扼要")
+    description: str = Field(description="步骤的具体操作描述")
+    status: Literal["pending", "in_progress", "completed", "skipped"] = Field(default="pending", description="步骤状态")
 
 
 class ETLArtifacts(BaseModel):
