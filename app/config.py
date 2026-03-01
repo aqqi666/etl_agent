@@ -6,6 +6,12 @@ class Settings(BaseSettings):
     llm_api_key: str = "sk-xxx"
     llm_model: str = "gpt-4o"
 
+    # 各节点可单独指定模型，不设则用 llm_model
+    planner_model: str = ""
+    executor_model: str = ""
+    observer_model: str = ""
+    replanner_model: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

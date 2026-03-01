@@ -23,11 +23,13 @@ from app.tools import ALL_TOOLS
 logger = logging.getLogger(__name__)
 
 
-def _get_llm() -> ChatOpenAI:
+def _get_llm(role: str = "") -> ChatOpenAI:
+    """根据角色名获取对应模型，未单独配置时回退到默认模型。"""
+    model = getattr(settings, f"{role}_model", "") if role else ""
     return ChatOpenAI(
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key,
-        model=settings.llm_model,
+        model=model or settings.llm_model,
         temperature=0,
     )
 
@@ -42,7 +44,7 @@ def _artifacts_json(artifacts: ETLArtifacts) -> str:
 async def planner(state: ETLState) -> dict:
     """生成或更新 ETL 计划"""
     logger.info("[planner] 开始生成 ETL 计划")
-    llm = _get_llm().with_structured_output(ETLPlan, method="function_calling")
+    llm = _get_llm("planner").with_structured_output(ETLPlan, method="function_calling")
     artifacts = state.get("artifacts", ETLArtifacts())
     past_steps = state.get("past_steps", [])
 
@@ -147,7 +149,7 @@ async def executor(state: ETLState) -> dict:
         step_desc = "所有步骤已完成"
         logger.info("[executor] 所有步骤已完成")
 
-    llm = _get_llm()
+    llm = _get_llm("executor")
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
     prompt = EXECUTOR_PROMPT.format(
@@ -173,7 +175,7 @@ async def executor(state: ETLState) -> dict:
 async def observer(state: ETLState) -> dict:
     """分析 tool 执行结果，生成结构化输出，更新 artifacts"""
     logger.info("[observer] 开始分析工具执行结果")
-    llm = _get_llm().with_structured_output(StepObservation, method="function_calling")
+    llm = _get_llm("observer").with_structured_output(StepObservation, method="function_calling")
     artifacts = state.get("artifacts", ETLArtifacts())
 
     # 收集最近的 tool 结果
@@ -222,7 +224,7 @@ async def observer(state: ETLState) -> dict:
 async def replanner(state: ETLState) -> dict:
     """决定下一步：继续 / 调整计划 / 结束 / 提问"""
     logger.info("[replanner] 开始决策下一步行动")
-    llm = _get_llm().with_structured_output(ReplanDecision, method="function_calling")
+    llm = _get_llm("replanner").with_structured_output(ReplanDecision, method="function_calling")
     artifacts = state.get("artifacts", ETLArtifacts())
     plan = state.get("plan", [])
     past_steps = state.get("past_steps", [])
