@@ -31,6 +31,7 @@ def _get_llm(role: str = "") -> ChatOpenAI:
         api_key=settings.llm_api_key,
         model=model or settings.llm_model,
         temperature=0,
+        extra_body={"enable_thinking": False},
     )
 
 
