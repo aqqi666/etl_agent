@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_stream_writer
 
@@ -68,6 +70,63 @@ async def planner(state: ETLState) -> dict:
         "current_step": 0,
         "response": None,
     }
+
+
+# ── parallel tool node ───────────────────────────────────────────────
+
+# 写操作工具名集合，这些工具保持串行执行
+WRITE_TOOLS = {"execute_sql"}
+
+
+async def parallel_tool_node(state: ETLState) -> dict:
+    """并行执行只读工具，串行执行写操作工具"""
+    last_msg = state["messages"][-1]
+    tool_calls = getattr(last_msg, "tool_calls", [])
+    if not tool_calls:
+        return {"messages": []}
+
+    tool_map = {t.name: t for t in ALL_TOOLS}
+
+    async def _run_one(call: dict) -> ToolMessage:
+        tool = tool_map[call["name"]]
+        try:
+            result = await asyncio.to_thread(tool.invoke, call["args"])
+        except Exception as e:
+            logger.error("[parallel_tool_node] 工具 %s 执行失败: %s", call["name"], e)
+            result = f"工具执行失败: {e}"
+        return ToolMessage(content=str(result), tool_call_id=call["id"], name=call["name"])
+
+    start = time.time()
+
+    # 按原始顺序记录索引，分组执行后再合并
+    results: list[ToolMessage | None] = [None] * len(tool_calls)
+
+    read_indices = []
+    write_indices = []
+    for i, call in enumerate(tool_calls):
+        if call["name"] in WRITE_TOOLS:
+            write_indices.append(i)
+        else:
+            read_indices.append(i)
+
+    # 只读工具并行执行
+    if read_indices:
+        read_tasks = [_run_one(tool_calls[i]) for i in read_indices]
+        read_results = await asyncio.gather(*read_tasks)
+        for idx, res in zip(read_indices, read_results):
+            results[idx] = res
+
+    # 写操作串行执行
+    for i in write_indices:
+        results[i] = await _run_one(tool_calls[i])
+
+    elapsed = time.time() - start
+    logger.info(
+        "[parallel_tool_node] 执行 %d 个工具（%d 并行, %d 串行）耗时 %.2fs",
+        len(tool_calls), len(read_indices), len(write_indices), elapsed,
+    )
+
+    return {"messages": list(results)}
 
 
 # ── executor ─────────────────────────────────────────────────────────

@@ -3,11 +3,10 @@ import logging
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import tools_condition
 
-from app.agent.nodes import executor, observer, planner, replanner
+from app.agent.nodes import executor, observer, parallel_tool_node, planner, replanner
 from app.agent.state import ETLState
-from app.tools import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +37,13 @@ def route_after_replan(state: ETLState) -> str:
 
 def build_graph():
     logger.info("[graph] 开始构建 ETL Agent 流程图")
-    tool_node = ToolNode(ALL_TOOLS)
 
     graph = StateGraph(ETLState)
 
     # 添加节点
     graph.add_node("planner", planner)
     graph.add_node("executor", executor)
-    graph.add_node("tools", tool_node)
+    graph.add_node("tools", parallel_tool_node)
     graph.add_node("observer", observer)
     graph.add_node("replanner", replanner)
 
