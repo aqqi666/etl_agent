@@ -3,6 +3,7 @@ from app.tools.inspection import list_databases, list_tables, describe_table, ge
 from app.tools.query import execute_query, preview_data
 from app.tools.mutation import execute_sql
 from app.tools.quality import check_data_quality
+from app.tools.render import render
 
 ALL_TOOLS = [
     test_connection,
@@ -14,4 +15,5 @@ ALL_TOOLS = [
     preview_data,
     execute_sql,
     check_data_quality,
+    render,
 ]

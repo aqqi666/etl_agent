@@ -13,7 +13,7 @@ class StepResult(BaseModel):
 
     # ── Observer 职责：分析结果 ──
     summary: str = Field(description="一句话总结本步骤的执行结果，用于日志和历史记录")
-    display_text: str = Field(description="展示给用户的 Markdown 内容，包含 SQL 代码块和数据表格。只陈述事实，不包含引导或提问")
+    display_text: str = Field(description="展示给用户的文字内容。若 render 工具已展示数据则可为空；若未调用 render（如连接测试、SQL执行），则必须包含操作结果。不包含表格和提问")
     artifacts_update: dict = Field(default_factory=dict, description="需要更新到 artifacts 中的字段键值对")
 
     # ── Replanner 职责：决策下一步 ──

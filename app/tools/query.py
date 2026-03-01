@@ -3,6 +3,7 @@ import logging
 from langchain_core.tools import tool
 
 from app.db.executor import execute_sql_query, resolve_connection
+from app.tools.rich_result import make_rich_result
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +24,20 @@ def execute_query(sql: str, connection_string: str = "") -> str:
             return "查询返回 0 行数据"
         logger.info("[tool:execute_query] 查询返回 %d 行", len(rows))
         columns = list(rows[0].keys())
-        lines = ["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"]
-        for r in rows[:50]:
-            lines.append("| " + " | ".join(str(r.get(c, "")) for c in columns) + " |")
-        result = "\n".join(lines)
+        display_rows = rows[:50]
+        summary = f"查询返回 {len(rows)} 行、{len(columns)} 列。列名: {', '.join(columns)}"
         if len(rows) > 50:
-            result += f"\n\n... 共 {len(rows)} 行，仅显示前 50 行"
-        return result
+            summary += "（仅展示前 50 行）"
+        return make_rich_result(
+            tool_name="execute_query",
+            result_type="table",
+            title=f"查询结果（{len(rows)} 行）",
+            sql=sql,
+            columns=columns,
+            rows=[{c: r.get(c) for c in columns} for r in display_rows],
+            total_rows=len(rows),
+            summary=summary,
+        )
     except Exception as e:
         logger.error("[tool:execute_query] 失败: %s", e)
         return f"查询失败: {e}"
@@ -41,19 +49,24 @@ def preview_data(database: str, table: str, limit: int = 10, connection_string: 
     logger.info("[tool:preview_data] 预览 %s.%s 前 %d 行", database, table, limit)
     try:
         conn_str = resolve_connection(connection_string or None)
-        rows = execute_sql_query(
-            conn_str,
-            f"SELECT * FROM `{database}`.`{table}` LIMIT {limit}",
-        )
+        sql = f"SELECT * FROM `{database}`.`{table}` LIMIT {limit}"
+        rows = execute_sql_query(conn_str, sql)
         if not rows:
             logger.info("[tool:preview_data] 表为空")
             return f"表 {database}.{table} 没有数据"
         logger.info("[tool:preview_data] 返回 %d 行数据", len(rows))
         columns = list(rows[0].keys())
-        lines = ["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"]
-        for r in rows:
-            lines.append("| " + " | ".join(str(r.get(c, "")) for c in columns) + " |")
-        return f"表 {database}.{table} 前 {limit} 行:\n" + "\n".join(lines)
+        summary = f"表 {database}.{table} 前 {len(rows)} 行预览，共 {len(columns)} 列: {', '.join(columns)}"
+        return make_rich_result(
+            tool_name="preview_data",
+            result_type="table",
+            title=f"表 {database}.{table} 前 {len(rows)} 行",
+            sql=sql,
+            columns=columns,
+            rows=[{c: r.get(c) for c in columns} for r in rows],
+            total_rows=len(rows),
+            summary=summary,
+        )
     except Exception as e:
         logger.error("[tool:preview_data] 失败: %s", e)
         return f"查询失败: {e}"

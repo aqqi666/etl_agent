@@ -3,6 +3,7 @@ import logging
 from langchain_core.tools import tool
 
 from app.db.executor import execute_sql_query, resolve_connection
+from app.tools.rich_result import make_rich_result
 
 logger = logging.getLogger(__name__)
 
@@ -50,18 +51,15 @@ def check_data_quality(database: str, table: str, connection_string: str = "") -
         )
         null_row = null_result[0] if null_result else {}
 
-        lines = [
-            f"## 数据质量报告: {database}.{table}",
-            f"- 总行数: {total}",
-            "",
-            "### 空值统计",
-            "| 字段 | 空值数 | 空值率 |",
-            "| --- | --- | --- |",
-        ]
+        # 构建空值统计的结构化数据
+        null_columns = ["字段", "空值数", "空值率"]
+        null_rows = []
         for c in columns:
             nulls = null_row.get(f"{c}_nulls", 0)
             rate = f"{nulls / total * 100:.2f}%" if total > 0 else "N/A"
-            lines.append(f"| {c} | {nulls} | {rate} |")
+            null_rows.append({"字段": c, "空值数": nulls, "空值率": rate})
+
+        metadata = {"total_rows": total}
 
         # ── 数值字段极值（MIN / MAX / AVG）──
         if numeric_columns:
@@ -74,21 +72,39 @@ def check_data_quality(database: str, table: str, connection_string: str = "") -
             agg_result = execute_sql_query(conn_str, agg_sql)
             agg_row = agg_result[0] if agg_result else {}
 
-            lines.append("")
-            lines.append("### 数值字段极值")
-            lines.append("| 字段 | 最小值 | 最大值 | 平均值 |")
-            lines.append("| --- | --- | --- | --- |")
+            agg_table_columns = ["字段", "最小值", "最大值", "平均值"]
+            agg_table_rows = []
             for c in numeric_columns:
                 min_v = agg_row.get(f"min_{c}", "N/A")
                 max_v = agg_row.get(f"max_{c}", "N/A")
                 avg_v = agg_row.get(f"avg_{c}", "N/A")
-                # 格式化平均值为 2 位小数
                 if isinstance(avg_v, (int, float)):
                     avg_v = f"{avg_v:.2f}"
-                lines.append(f"| {c} | {min_v} | {max_v} | {avg_v} |")
+                agg_table_rows.append({"字段": c, "最小值": min_v, "最大值": max_v, "平均值": avg_v})
+            metadata["numeric_stats"] = {
+                "columns": agg_table_columns,
+                "rows": agg_table_rows,
+            }
+
+        # 摘要
+        problem_cols = [c for c in columns if null_row.get(f"{c}_nulls", 0) > 0]
+        summary = f"数据质量检查完成。总行数: {total}。"
+        if problem_cols:
+            summary += f" 有空值的字段: {', '.join(problem_cols)}"
+        else:
+            summary += " 所有字段无空值。"
 
         logger.info("[tool:check_data_quality] 检查完成，总行数: %d, 数值字段: %d 个", total, len(numeric_columns))
-        return "\n".join(lines)
+        return make_rich_result(
+            tool_name="check_data_quality",
+            result_type="quality_report",
+            title=f"数据质量报告: {database}.{table}",
+            columns=null_columns,
+            rows=null_rows,
+            total_rows=total,
+            summary=summary,
+            metadata=metadata,
+        )
     except Exception as e:
         logger.error("[tool:check_data_quality] 失败: %s", e)
         return f"数据质量检查失败: {e}"

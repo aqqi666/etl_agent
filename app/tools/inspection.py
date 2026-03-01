@@ -3,6 +3,7 @@ import logging
 from langchain_core.tools import tool
 
 from app.db.executor import execute_sql_query, resolve_connection
+from app.tools.rich_result import make_rich_result
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,16 @@ def list_databases(connection_string: str = "") -> str:
         rows = execute_sql_query(conn_str, "SHOW DATABASES")
         dbs = [list(r.values())[0] for r in rows]
         logger.info("[tool:list_databases] 找到 %d 个数据库", len(dbs))
-        return "数据库列表:\n" + "\n".join(f"- {db}" for db in dbs)
+        text = "数据库列表:\n" + "\n".join(f"- {db}" for db in dbs)
+        summary = f"共 {len(dbs)} 个数据库: {', '.join(dbs)}"
+        return make_rich_result(
+            tool_name="list_databases",
+            result_type="text",
+            title="数据库列表",
+            sql="SHOW DATABASES",
+            text=text,
+            summary=summary,
+        )
     except Exception as e:
         logger.error("[tool:list_databases] 失败: %s", e)
         return f"查询失败: {e}"
@@ -31,7 +41,16 @@ def list_tables(database: str, connection_string: str = "") -> str:
         rows = execute_sql_query(conn_str, f"SHOW TABLES FROM `{database}`")
         tables = [list(r.values())[0] for r in rows]
         logger.info("[tool:list_tables] 找到 %d 张表", len(tables))
-        return f"数据库 {database} 中的表:\n" + "\n".join(f"- {t}" for t in tables)
+        text = f"数据库 {database} 中的表:\n" + "\n".join(f"- {t}" for t in tables)
+        summary = f"数据库 {database} 共 {len(tables)} 张表: {', '.join(tables)}"
+        return make_rich_result(
+            tool_name="list_tables",
+            result_type="text",
+            title=f"数据库 {database} 中的表",
+            sql=f"SHOW TABLES FROM `{database}`",
+            text=text,
+            summary=summary,
+        )
     except Exception as e:
         logger.error("[tool:list_tables] 失败: %s", e)
         return f"查询失败: {e}"
@@ -47,14 +66,30 @@ def describe_table(database: str, table: str, connection_string: str = "") -> st
             conn_str,
             f"SHOW FULL COLUMNS FROM `{database}`.`{table}`",
         )
-        lines = ["| 字段 | 类型 | 允许空 | 键 | 默认值 | 备注 |", "| --- | --- | --- | --- | --- | --- |"]
+        columns = ["字段", "类型", "允许空", "键", "默认值", "备注"]
+        table_rows = []
         for r in rows:
-            lines.append(
-                f"| {r.get('Field', '')} | {r.get('Type', '')} | {r.get('Null', '')} "
-                f"| {r.get('Key', '')} | {r.get('Default', '')} | {r.get('Comment', '')} |"
-            )
+            table_rows.append({
+                "字段": r.get("Field", ""),
+                "类型": r.get("Type", ""),
+                "允许空": r.get("Null", ""),
+                "键": r.get("Key", ""),
+                "默认值": str(r.get("Default", "")),
+                "备注": r.get("Comment", ""),
+            })
+        field_names = [r.get("Field", "") for r in rows]
+        summary = f"表 {database}.{table} 有 {len(rows)} 个字段: {', '.join(field_names)}"
         logger.info("[tool:describe_table] 表 %s.%s 有 %d 个字段", database, table, len(rows))
-        return f"表 {database}.{table} 结构:\n" + "\n".join(lines)
+        return make_rich_result(
+            tool_name="describe_table",
+            result_type="table",
+            title=f"表 {database}.{table} 结构",
+            sql=f"SHOW FULL COLUMNS FROM `{database}`.`{table}`",
+            columns=columns,
+            rows=table_rows,
+            total_rows=len(rows),
+            summary=summary,
+        )
     except Exception as e:
         logger.error("[tool:describe_table] 失败: %s", e)
         return f"查询失败: {e}"
@@ -79,10 +114,19 @@ def get_column_details(database: str, table: str, column: str, connection_string
         samples = [str(r["val"]) for r in sample_result]
 
         logger.info("[tool:get_column_details] 列 %s 有 %d 个唯一值", column, distinct_count)
-        return (
+        text = (
             f"列 {database}.{table}.{column} 详情:\n"
             f"- 唯一值数量: {distinct_count}\n"
             f"- 样本值: {', '.join(samples)}"
+        )
+        summary = f"列 {database}.{table}.{column} 有 {distinct_count} 个唯一值，样本: {', '.join(samples[:5])}"
+        return make_rich_result(
+            tool_name="get_column_details",
+            result_type="text",
+            title=f"列 {database}.{table}.{column} 详情",
+            text=text,
+            summary=summary,
+            metadata={"distinct_count": distinct_count, "samples": samples},
         )
     except Exception as e:
         logger.error("[tool:get_column_details] 失败: %s", e)

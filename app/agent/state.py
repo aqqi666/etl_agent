@@ -43,3 +43,5 @@ class ETLState(TypedDict):
     past_steps: Annotated[list[tuple[str, str]], operator.add]
     artifacts: ETLArtifacts
     response: str | None
+    render_cache: dict  # 跨 ReAct 周期缓存结构化工具结果，供 render 工具使用
+    rendered_content: str | None  # render 工具格式化后的 Markdown，由 analyzer 合并到最终 response
