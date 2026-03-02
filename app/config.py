@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     observer_model: str = ""
     replanner_model: str = ""
 
+    # MOI (MatrixOne Intelligence) 配置
+    moi_key: str = ""
+    moi_base_url: str = ""  # 如 http://127.0.0.1:8000 或 https://xxx.matrixone.tech
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

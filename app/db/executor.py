@@ -1,12 +1,26 @@
 import logging
 
+import httpx
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 _engines: dict[str, Engine] = {}
 _current_connection: str | None = None
+
+# SQL 关键词 → MOI operation 映射
+_SQL_TO_MOI_OPERATION: dict[str, str] = {
+    "CREATE": "create_table",
+    "INSERT": "insert",
+    "REPLACE": "replace",
+    "UPDATE": "update",
+    "DELETE": "delete",
+    "TRUNCATE": "truncate",
+    "ALTER": "alter_table",
+}
 
 
 def get_current_connection() -> str | None:
@@ -37,6 +51,55 @@ def _ensure_charset(connection_string: str) -> str:
     return connection_string
 
 
+def _moi_enabled() -> bool:
+    """检查 MOI 配置是否完整"""
+    return bool(settings.moi_key and settings.moi_base_url)
+
+
+def _is_write_sql(sql: str) -> bool:
+    """判断 SQL 是否为写操作"""
+    first_word = sql.strip().split()[0].upper() if sql.strip() else ""
+    return first_word in _SQL_TO_MOI_OPERATION
+
+
+def _get_moi_operation(sql: str) -> str:
+    """从 SQL 获取 MOI operation 类型"""
+    first_word = sql.strip().split()[0].upper() if sql.strip() else ""
+    return _SQL_TO_MOI_OPERATION.get(first_word, "run_sql")
+
+
+def _execute_via_moi(sql: str) -> list[dict]:
+    """通过 MOI REST API 执行写操作 SQL"""
+    base_url = settings.moi_base_url.rstrip("/")
+    url = f"{base_url}/catalog/nl2sql/run_sql"
+    operation = _get_moi_operation(sql)
+
+    headers = {
+        "Content-Type": "application/json",
+        "moi-key": settings.moi_key,
+    }
+    payload = {
+        "operation": operation,
+        "statement": sql,
+    }
+
+    logger.info("[moi] 通过 MOI API 执行 (operation=%s): %s", operation, sql[:300])
+
+    resp = httpx.post(url, json=payload, headers=headers, timeout=60)
+    resp.raise_for_status()
+    result = resp.json()
+    logger.info("[moi] MOI API 返回: %s", str(result)[:500])
+
+    # 检查业务错误
+    code = result.get("code", "")
+    if code != "OK":
+        msg = result.get("msg", "未知错误")
+        raise RuntimeError(f"MOI API 错误: {msg}")
+
+    # 兼容现有返回格式
+    return [{"affected_rows": 0, "moi_response": result}]
+
+
 def get_engine(connection_string: str) -> Engine:
     if connection_string not in _engines:
         safe_conn = connection_string.split("@")[-1] if "@" in connection_string else connection_string
@@ -49,6 +112,12 @@ def get_engine(connection_string: str) -> Engine:
 
 def execute_sql_query(connection_string: str, sql: str) -> list[dict]:
     logger.info("[db] 执行 SQL: %s", sql[:300])
+
+    # MOI 已配置且为写操作 → 走 MOI API
+    if _moi_enabled() and _is_write_sql(sql):
+        return _execute_via_moi(sql)
+
+    # 其他走 SQLAlchemy
     engine = get_engine(connection_string)
     with engine.connect() as conn:
         result = conn.execute(text(sql))
