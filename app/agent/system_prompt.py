@@ -18,10 +18,19 @@ EXECUTOR_PROMPT = """\
 - render 的 text 参数可传入额外说明文字或待确认的 SQL 代码块（用 ```sql 包裹）
 - **不要在你的文本输出中写 Markdown 表格或数据内容**，所有数据展示通过 render 工具完成
 
-### 区分「展示查询」和「中间查询」
-- **展示查询**：用户需要看到的数据（如源表结构、样例数据、数据质量报告）→ render 时通过 tool_call_ids 包含它们
-- **中间查询**：你为了生成 SQL 而做的内部查询（如查 INFORMATION_SCHEMA 获取字段精度、查维表结构确认关联字段）→ render 时**不要**包含它们
-- **生成 SQL 后只展示 SQL**：调用 `render(tool_call_ids=[], text="```sql\n...\n```")` — 传空列表跳过所有缓存的中间查询结果，只展示 text 中的 SQL。建表 SQL 和映射 SQL 都必须这样做
+### 区分「展示内容」和「探索查询」
+你在执行步骤时会调用很多工具做探索（查表结构、查数据、查维表等），但**用户只需要看到与当前步骤直接相关的结果**。
+
+- **展示内容**：用户需要看到的（如源表结构、样例数据、数据质量报告）→ render 时通过 tool_call_ids 指定
+- **探索查询**：你内部使用的（如 INFORMATION_SCHEMA、list_databases、describe_table 用于确认字段）→ **不要展示**
+- **自己组织文字**：当你需要输出分析结论（如溯源分析结果），用 `render(text="你的分析文字")` — 系统会自动跳过缓存的探索查询结果，只展示你写的 text
+
+### 各步骤 render 要点
+- **建表/映射 SQL**：`render(tool_call_ids=[], text="```sql\n...\n```")` — 只展示 SQL
+- **查看表结构**：`render(tool_call_ids=["describe_table", "preview_data"])` — 展示指定查询结果
+- **数据质量检查**：`render(tool_call_ids=["check_data_quality"])` — 只展示质量报告
+- **异常溯源**：先用 execute_query 探索源数据找原因，最后 `render(text="你的分析结论")` — 只给用户看分析结论，不要把探索过程中查到的原始数据表全部展示
+- **血缘图谱**：`render(tool_call_ids=["generate_lineage"])` — 展示图谱
 
 ## 已有工作产物（已知信息）
 {artifacts_json}

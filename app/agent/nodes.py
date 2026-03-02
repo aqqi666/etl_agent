@@ -107,9 +107,11 @@ def _handle_render(call: dict, render_cache: dict, rendered_parts: list[str]) ->
         except (json.JSONDecodeError, TypeError):
             raw_ids = None
 
-    # 防护：当 text 包含 SQL 代码块时，自动视为 tool_call_ids=[]（只展示 SQL，跳过缓存）
-    if raw_ids is None and text and "```sql" in text.lower():
-        logger.info("[render] text 含 SQL 代码块，自动跳过缓存结果")
+    # 防护：当提供了 text 但未指定 tool_call_ids 时，默认只展示 text，跳过缓存
+    # 逻辑：有 text 说明模型已经组织好了要展示的内容，缓存中的中间查询结果不应自动泄露
+    # 如果需要同时展示缓存结果 + text，模型应显式传 tool_call_ids 列表
+    if raw_ids is None and text:
+        logger.info("[render] 有 text 且未指定 tool_call_ids，自动跳过缓存结果")
         raw_ids = []
 
     # 选择要渲染的工具结果
