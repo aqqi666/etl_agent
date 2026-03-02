@@ -11,15 +11,19 @@ logger = logging.getLogger(__name__)
 _engines: dict[str, Engine] = {}
 _current_connection: str | None = None
 
-# SQL 关键词 → MOI operation 映射
-_SQL_TO_MOI_OPERATION: dict[str, str] = {
-    "CREATE": "create_table",
+# 前两个关键词 → MOI operation 映射（MOI 只支持表级操作）
+_SQL_PREFIX_TO_MOI_OP: dict[str, str] = {
+    "CREATE TABLE": "create_table",
+    "ALTER TABLE": "alter_table",
+    "TRUNCATE TABLE": "truncate",
+}
+# 单关键词 → MOI operation（这些不会有歧义）
+_SQL_WORD_TO_MOI_OP: dict[str, str] = {
     "INSERT": "insert",
     "REPLACE": "replace",
     "UPDATE": "update",
     "DELETE": "delete",
     "TRUNCATE": "truncate",
-    "ALTER": "alter_table",
 }
 
 
@@ -56,23 +60,25 @@ def _moi_enabled() -> bool:
     return bool(settings.moi_key and settings.moi_base_url)
 
 
-def _is_write_sql(sql: str) -> bool:
-    """判断 SQL 是否为写操作"""
-    first_word = sql.strip().split()[0].upper() if sql.strip() else ""
-    return first_word in _SQL_TO_MOI_OPERATION
+def _get_moi_operation(sql: str) -> str | None:
+    """判断 SQL 是否应走 MOI，返回 operation 或 None（不走 MOI）"""
+    words = sql.strip().split()
+    if len(words) < 1:
+        return None
+    # 先用前两个词匹配（区分 CREATE TABLE vs CREATE DATABASE）
+    if len(words) >= 2:
+        prefix = f"{words[0].upper()} {words[1].upper()}"
+        if prefix in _SQL_PREFIX_TO_MOI_OP:
+            return _SQL_PREFIX_TO_MOI_OP[prefix]
+    # 再用第一个词匹配
+    first = words[0].upper()
+    return _SQL_WORD_TO_MOI_OP.get(first)
 
 
-def _get_moi_operation(sql: str) -> str:
-    """从 SQL 获取 MOI operation 类型"""
-    first_word = sql.strip().split()[0].upper() if sql.strip() else ""
-    return _SQL_TO_MOI_OPERATION.get(first_word, "run_sql")
-
-
-def _execute_via_moi(sql: str) -> list[dict]:
+def _execute_via_moi(sql: str, operation: str) -> list[dict]:
     """通过 MOI REST API 执行写操作 SQL"""
     base_url = settings.moi_base_url.rstrip("/")
     url = f"{base_url}/catalog/nl2sql/run_sql"
-    operation = _get_moi_operation(sql)
 
     headers = {
         "Content-Type": "application/json",
@@ -113,9 +119,10 @@ def get_engine(connection_string: str) -> Engine:
 def execute_sql_query(connection_string: str, sql: str) -> list[dict]:
     logger.info("[db] 执行 SQL: %s", sql[:300])
 
-    # MOI 已配置且为写操作 → 走 MOI API
-    if _moi_enabled() and _is_write_sql(sql):
-        return _execute_via_moi(sql)
+    # MOI 已配置且为 MOI 支持的写操作 → 走 MOI API
+    moi_op = _get_moi_operation(sql) if _moi_enabled() else None
+    if moi_op:
+        return _execute_via_moi(sql, moi_op)
 
     # 其他走 SQLAlchemy
     engine = get_engine(connection_string)

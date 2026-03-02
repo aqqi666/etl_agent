@@ -29,7 +29,7 @@ EXECUTOR_PROMPT = """\
 - **建表/映射 SQL**：`render(tool_call_ids=[], text="```sql\n...\n```")` — 只展示 SQL
 - **查看表结构**：`render(tool_call_ids=["describe_table", "preview_data"])` — 展示指定查询结果
 - **数据质量检查**：`render(tool_call_ids=["check_data_quality"])` — 只展示质量报告
-- **异常溯源**：先用 execute_query 探索源数据找原因，最后 `render(text="你的分析结论")` — 只给用户看分析结论，不要把探索过程中查到的原始数据表全部展示
+- **异常溯源**：先用 execute_query 探索源数据找原因，最后 `render(text="你的分析结论")` — 展示关键佐证数据和分析结论，不要把探索过程中所有中间查询结果全部展示，只保留与结论直接相关的数据
 - **血缘图谱**：`render(tool_call_ids=["generate_lineage"])` — 展示图谱
 
 ## 已有工作产物（已知信息）
