@@ -53,7 +53,6 @@ def generate_lineage(nodes: list[dict], edges: list[dict], title: str = "") -> s
         tool_name="generate_lineage",
         result_type="lineage",
         title=title or "字段级数据血缘图谱",
-        text=mermaid_code,
         summary=f"已生成血缘图谱，包含 {len(nodes)} 个字段节点和 {len(edges)} 条血缘关系",
         metadata={"mermaid": mermaid_code},
     )
