@@ -26,6 +26,7 @@ DEFAULT_PLAN = [
     ETLStep(index=4, title="建立字段映射", description="根据用户描述的映射规则生成 INSERT INTO ... SELECT SQL，等待用户确认后执行"),
     ETLStep(index=5, title="数据质量检查", description="检查目标表的数据质量（行数、空值率等）"),
     ETLStep(index=6, title="异常溯源", description="如发现数据异常，追溯到源表分析原因"),
+    ETLStep(index=7, title="生成血缘图谱", description="根据字段映射 SQL 分析字段级数据血缘关系，调用 generate_lineage 工具生成 Mermaid 图谱，通过 render 展示"),
 ]
 
 
