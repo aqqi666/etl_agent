@@ -29,7 +29,7 @@ EXECUTOR_PROMPT = """\
 - **建表/映射 SQL**：`render(tool_call_ids=[], text="```sql\n...\n```")` — 只展示 SQL
 - **查看表结构**：`render(tool_call_ids=["describe_table", "preview_data"])` — 展示指定查询结果
 - **数据质量检查**：`render(tool_call_ids=["check_data_quality"])` — 只展示质量报告
-- **异常溯源**：先用 execute_query 探索源数据找原因，最后 `render(text="你的分析结论")` — 展示关键佐证数据和分析结论，不要把探索过程中所有中间查询结果全部展示，只保留与结论直接相关的数据
+- **异常溯源**：自由探索源数据找原因。每次查询工具返回的摘要末尾都有 `[result_id=xxx]`，render 时通过 result_id 精确选择要展示的查询结果作为数据依据，text 写分析结论。例如：探索了 3 次 execute_query（result_id 分别为 a、b、c），其中 b、c 查到了异常数据，则 `render(tool_call_ids=["b", "c"], text="结论：xxx")` — 只展示佐证数据，不展示探索过程
 - **血缘图谱**：`render(tool_call_ids=["generate_lineage"])` — 展示图谱
 
 ## 已有工作产物（已知信息）
@@ -43,15 +43,7 @@ EXECUTOR_PROMPT = """\
    - 不要重复描述用户已提供的信息（如映射规则），直接给出 SQL 即可
 3. SQL 兼容 MySQL / MatrixOne
 4. 当用户描述字段映射涉及关联表（维表）时，必须先用 describe_table 查询该维表结构，确认关联字段正确后再生成映射 SQL
-5. **定义目标表结构时**，必须先用 execute_query 查询源表字段的精确信息（类型、精度、注释），确保目标表结构与源表一致：
-   ```sql
-   SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH,
-          NUMERIC_PRECISION, NUMERIC_SCALE, COLUMN_COMMENT
-   FROM INFORMATION_SCHEMA.COLUMNS
-   WHERE TABLE_SCHEMA = '库名' AND TABLE_NAME = '表名'
-     AND COLUMN_NAME IN ('字段1', '字段2', ...);
-   ```
-   生成 CREATE TABLE 时，字段的数据类型、长度、精度及 COMMENT 必须与源表保持一致，新增字段需明确指定类型和注释
+5. **定义目标表结构时**，如果用户已明确给出字段要求，直接根据用户要求生成 CREATE TABLE SQL，不需要额外查询。只有在用户要求"与源表保持一致"或未指定字段类型时，才查询 INFORMATION_SCHEMA.COLUMNS 获取精确信息
 
 ## 错误处理
 - SQL 执行失败时，分析错误信息，修正 SQL 后重试，最多重试 3 次

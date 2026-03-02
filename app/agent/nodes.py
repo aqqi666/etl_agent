@@ -197,8 +197,9 @@ async def parallel_tool_node(state: ETLState) -> dict:
             if isinstance(parsed, dict) and parsed.get("__structured__"):
                 # 缓存 payload 供 render 使用
                 render_cache[call["id"]] = parsed["payload"]
-                # LLM 只拿到摘要
-                llm_content = parsed.get("summary", "工具执行完成")
+                # LLM 拿到摘要 + result_id（供 render 精确引用）
+                summary = parsed.get("summary", "工具执行完成")
+                llm_content = f"{summary} [result_id={call['id']}]"
         except (json.JSONDecodeError, KeyError, TypeError):
             pass  # 非结构化结果，原样传递
 
