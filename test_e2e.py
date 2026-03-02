@@ -136,6 +136,12 @@ def main():
         ):
             return
 
+        # ── 步骤7: 生成血缘图谱 ──
+        if not run_step(ws, 7, "生成血缘图谱",
+            "请生成字段级血缘图谱"
+        ):
+            return
+
     finally:
         ws.close()
         print("\n" + "=" * 70)
