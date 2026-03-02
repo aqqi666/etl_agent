@@ -29,6 +29,7 @@ class ETLArtifacts(BaseModel):
     target_table: str | None = None
     target_ddl: str | None = None
     target_created: bool = False
+    field_mapping_rules: list[str] = Field(default_factory=list)
     field_mapping_sql: str | None = None
     mapping_executed: bool = False
     quality_report: str | None = None
