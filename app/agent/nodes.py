@@ -86,6 +86,12 @@ def _format_payload_to_markdown(payload: dict) -> str:
                 data_lines.append("| " + " | ".join(str(row.get(c, "")) for c in ns_columns) + " |")
             sections.append(header + "\n" + separator + "\n" + "\n".join(data_lines) + "\n")
 
+    # lineage 血缘图谱（Mermaid）
+    if payload.get("result_type") == "lineage":
+        mermaid_code = metadata.get("mermaid", "")
+        if mermaid_code:
+            sections.append(f"```mermaid\n{mermaid_code}\n```\n")
+
     return "\n".join(sections)
 
 
