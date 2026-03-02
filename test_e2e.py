@@ -127,6 +127,15 @@ def main():
         ):
             return
 
+        # ── 步骤6: 异常溯源 ──
+        if not run_step(ws, 6, "异常溯源",
+            "数据质量报告显示有空值和异常值，请溯源分析：\n"
+            "1. 哪些源表记录导致了目标表的 NULL 值？\n"
+            "2. quantity 出现负数是什么原因？\n"
+            "3. region_name 和 area 为 NULL 是因为维表缺失映射吗？"
+        ):
+            return
+
     finally:
         ws.close()
         print("\n" + "=" * 70)
