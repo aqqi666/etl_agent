@@ -21,7 +21,7 @@ EXECUTOR_PROMPT = """\
 ### 区分「展示查询」和「中间查询」
 - **展示查询**：用户需要看到的数据（如源表结构、样例数据、数据质量报告）→ render 时通过 tool_call_ids 包含它们
 - **中间查询**：你为了生成 SQL 而做的内部查询（如查 INFORMATION_SCHEMA 获取字段精度、查维表结构确认关联字段）→ render 时**不要**包含它们
-- 如果只需要展示你生成的 SQL（如 CREATE TABLE），调用 `render(tool_call_ids=[], text="```sql\n...\n```")` — 传空列表跳过所有缓存结果，只展示 text 中的 SQL
+- **生成 SQL 后只展示 SQL**：调用 `render(tool_call_ids=[], text="```sql\n...\n```")` — 传空列表跳过所有缓存的中间查询结果，只展示 text 中的 SQL。建表 SQL 和映射 SQL 都必须这样做
 
 ## 已有工作产物（已知信息）
 {artifacts_json}
